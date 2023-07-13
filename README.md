@@ -13,7 +13,7 @@
 Для питания контроллера используется 12В вентустановки, обязательно проверяйте максимальные допустимые напряжения
 питания используемого контроллера или используйте внешние источники питания!
 
-![alt text](https://github.com/ironshaft/breezart-esphome/blob/main/d1-rs485?raw=true)
+![alt text](https://github.com/IronShaft/breezart-esphome/blob/main/d1-rs485.jpg?raw=true)
 
 ## Использованная документация
 [Описание контроллера RCCU](https://breezart.ru/tech/automation_breezart.pdf)
