@@ -323,7 +323,6 @@ switch:
     id: heating
     name: "Heating"
     icon: "mdi:heating-coil"
-    inverted: yes
     address: 0x56
     register_type: holding
     lambda: |-
