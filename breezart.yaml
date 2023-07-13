@@ -1,0 +1,408 @@
+esphome:
+  name: breezartvent
+  comment: "Breezart ventilation"
+
+  includes:
+      - breezart.h
+
+esp8266:
+  board: d1_mini
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret esp_key
+
+logger:
+  baud_rate: 0
+
+ota:
+  password: !secret esp_pass
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_pass
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Breezart Fallback"
+    password: !secret wifi_pass
+
+captive_portal:
+
+time:
+  - platform: homeassistant
+    timezone: "Europe/Moscow"
+    id: hass_time
+    on_time_sync:
+      then:
+        - output.turn_on: set_time
+
+uart:
+  id: uart_modbus
+  tx_pin: 1
+  rx_pin: 3
+  baud_rate: 19200
+  parity: even
+
+modbus:
+  id: mod_bus
+  uart_id: uart_modbus
+
+modbus_controller:
+  - id: breezart
+    address: 0x1
+    modbus_id: mod_bus
+    command_throttle: 500ms
+    update_interval: 10s
+    setup_priority: -10
+
+text_sensor:
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: hardware
+    name: "Hardware version"
+    register_type: read
+    address: 0x00
+    register_count: 1
+    raw_encode: HEXBYTES
+    response_size: 2
+    skip_updates: 10
+    lambda: |-
+      uint8_t major = modbus_controller::byte_from_hex_str(x, 0);
+      uint8_t minor = modbus_controller::byte_from_hex_str(x, 1);
+      return std::to_string(major) + "." + std::to_string(minor);
+
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: firmware
+    name: "Firmware version"
+    register_type: read
+    address: 0x01
+    register_count: 1
+    raw_encode: HEXBYTES
+    response_size: 2
+    skip_updates: 10
+    lambda: |-
+      uint8_t major = modbus_controller::byte_from_hex_str(x, 0);
+      uint8_t minor = modbus_controller::byte_from_hex_str(x, 1);
+      return std::to_string(major) + "." + std::to_string(minor);
+
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: frost_protection
+    name: "Frost protection"
+    icon: "mdi:snowflake-thermometer"
+    register_type: read
+    address: 0x03
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+    lambda: |-
+      boolean value = modbus_controller::word_from_hex_str(x, 0) & 0b100;
+      switch (value) {
+        case false: return std::string("Неактивно");
+        case true: return std::string("Активировано");
+      }
+
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: pump_training
+    name: "Pump training"
+    icon: "mdi:pump"
+    register_type: read
+    address: 0x03
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+    lambda: |-
+      boolean value = modbus_controller::word_from_hex_str(x, 0) & 0b1000;
+      switch (value) {
+        case false: return std::string("Неактивно");
+        case true: return std::string("Активировано");
+      }
+
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: power_state
+    register_type: read
+    address: 0x03
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+    name: "Power state"
+    icon: "mdi:state-machine"
+    lambda: |-
+      uint16_t value = modbus_controller::word_from_hex_str(x, 0) & 0b11;
+      switch (value) {
+        case 0: return std::string("Выключено");
+        case 1: return std::string("Включено");
+        case 2: return std::string("Выключение ...");
+        case 3: return std::string("Включение ...");
+        default: return std::string("Неизвестно");
+      }
+
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: mode_state
+    register_type: read
+    address: 0x04
+    register_count: 1
+    response_size: 2
+    raw_encode: HEXBYTES
+    name: "Mode state"
+    icon: "mdi:creation"
+    lambda: |-
+      uint16_t value = modbus_controller::word_from_hex_str(x, 0) & 0x0f;
+      switch (value) {
+        case 0b0001: return std::string("Вентиляция");
+        case 0b0010: return std::string("Вентиляция, подогрев");
+        case 0b0100: return std::string("Вентиляция, охлаждение");
+        case 0b1001: return std::string("Вентиляция, увлажнение");
+        case 0b1010: return std::string("Вентиляция, подогрев, увлажнение");
+        case 0b1100: return std::string("Вентиляция, охлаждение, увлажнение");
+        default: return std::string("Неизвестно");
+      }
+
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: error_message
+    register_type: read
+    address: 0x05
+    register_count: 2
+    response_size: 4
+    raw_encode: HEXBYTES
+    name: "Error message"
+    icon: "mdi:alert"
+    lambda: |-
+      uint16_t reg_0x05 = modbus_controller::word_from_hex_str(x, 0);
+      uint16_t reg_0x06 = modbus_controller::word_from_hex_str(x, 1);
+      uint8_t lbyte = reg_0x05 & 0xff;
+      uint8_t hbyte = reg_0x05 >> 8;
+      if ((reg_0x05 << 8 | reg_0x06) == 0) return std::string("Ошибок нет");
+      if (lbyte & 0b1) return std::string("Датчик температуры канала 0");
+      if (lbyte & 0b10) return std::string("Датчик температуры канала 1");
+      if (lbyte & 0b100) return std::string("Датчик температуры канала 2");
+      if (lbyte & 0b1000) return std::string("Датчика давления");
+      if (lbyte & 0b10000) return std::string("Неисправность в цепи выхода 0");
+      if (lbyte & 0b100000) return std::string("Неисправность в цепи выхода 1");
+      if (lbyte & 0b100000) return std::string("Ошибка чтения датчика 0 по Modbus");
+      if (lbyte & 0b1000000) return std::string("Ошибка чтения датчика 1 по Modbus");
+      if (hbyte & 0b1) return std::string("Ошибка увлажнителя");
+      if (hbyte & 0b10) return std::string("Холодная вода");
+      if (hbyte & 0b100) return std::string("Фильтр загрязнен");
+      if (hbyte & 0b1000) return std::string("Получен сигнал Пожар");
+      if (hbyte & 0b10000) return std::string("Угроза замораживания");
+      if (hbyte & 0b100000) return std::string("Перегрев");
+      if (hbyte & 0b1000000) return std::string("Авария охладителя");
+      if (hbyte & 0b10000000) return std::string("Авария дренажа");
+      if (reg_0x06 & 0b1) return std::string("Объединенная авария");
+      if (reg_0x06 & 0b10) return std::string("Неисправность вентилятора");
+      return std::string("Неизвестная ошибка");
+
+  - platform: version
+    name: "Breezart ESPHome Version"
+    hide_timestamp: true
+
+sensor:
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: fan_state
+    name: "Current FAN speed"
+    icon: "mdi:fan"
+    register_type: read
+    address: 0x1a
+    value_type: U_WORD
+
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: temp_air
+    name: "Current air temperature"
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    icon: "mdi:thermometer"
+    accuracy_decimals: 1
+    register_type: read
+    address: 0x08
+    value_type: U_WORD
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: temp_water
+    name: "Current water temperature"
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    icon: "mdi:thermometer-water"
+    accuracy_decimals: 1
+    register_type: read
+    address: 0x09
+    value_type: U_WORD
+    filters:
+    - multiply: 0.1
+
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: filter_usage
+    name: "Filter usage"
+    unit_of_measurement: "%"
+    icon: "mdi:air-filter"
+    register_type: read
+    address: 0x0f
+    value_type: U_WORD
+
+binary_sensor:
+  - platform: status
+    name: "Breezart Status"
+
+select:
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: fan_target
+    name: "Target FAN speed"
+    icon: "mdi:fan"
+    address: 0x68
+    value_type: U_WORD
+    optionsmap:
+      "1": 1
+      "2": 2
+      "3": 3
+      "4": 4
+      "5": 5
+      "6": 6
+      "7": 7
+      "8": 8
+
+number:
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: temp_target
+    name: "Target temperature"
+    unit_of_measurement: "°C"
+    device_class: "temperature"
+    icon: "mdi:thermometer"
+    address: 0x67
+    value_type: U_WORD
+    min_value: 15
+    max_value: 40
+    multiply: 10
+
+switch:
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: power
+    name: "Power"
+    icon: "mdi:power"
+    address: 0x66
+    register_type: holding
+    bitmask: 0x1
+
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: comfort
+    name: "Comfort"
+    icon: "mdi:leaf"
+    address: 0x56
+    register_type: holding
+    lambda: |-
+      reg_0x56 = data[0] << 8 | data[1];
+      return reg_0x56 & 0x10;
+    write_lambda: |-
+      reg_0x56 ^= 0x10;
+      payload.push_back(0x01); // device address
+      payload.push_back(0x06); // force single register
+      payload.push_back(0x00); // high byte address of the register
+      payload.push_back(0x56); // low byte address of the register
+      payload.push_back(reg_0x56 >> 8);
+      payload.push_back(reg_0x56 & 0xff);
+      return reg_0x56 & 0x10;
+
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: heating
+    name: "Heating"
+    icon: "mdi:heating-coil"
+    inverted: yes
+    address: 0x56
+    register_type: holding
+    lambda: |-
+      reg_0x56 = data[0] << 8 | data[1];
+      return reg_0x56 & 0x1;
+    write_lambda: |-
+      reg_0x56 ^= 0x1;
+      payload.push_back(0x01); // device address
+      payload.push_back(0x06); // force single register
+      payload.push_back(0x00); // high byte address of the register
+      payload.push_back(0x56); // low byte address of the register
+      payload.push_back(reg_0x56 >> 8);
+      payload.push_back(reg_0x56 & 0xff);
+      return reg_0x56 & 0x1;
+
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: restart
+    name: "Restart"
+    icon: "mdi:restart"
+    address: 0x56
+    register_type: holding
+    lambda: |-
+      reg_0x56 = data[0] << 8 | data[1];
+      return reg_0x56 & 0x100;
+    write_lambda: |-
+      reg_0x56 ^= 0x100;
+      payload.push_back(0x01); // device address
+      payload.push_back(0x06); // force single register
+      payload.push_back(0x00); // high byte address of the register
+      payload.push_back(0x56); // low byte address of the register
+      payload.push_back(reg_0x56 >> 8);
+      payload.push_back(reg_0x56 & 0xff);
+      return reg_0x56 & 0x100;
+
+button:
+  - platform: template
+    id: acknowledge_errors
+    name: "Acknowledge errors"
+    icon: "mdi:alert-circle-check"
+    on_press:
+      - output.turn_on: ack_err_out
+
+  - platform: template
+    id: time_setting
+    name: "Set current time"
+    icon: "mdi:calendar-clock"
+    on_press:
+      - output.turn_on: set_time
+
+output:
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: ack_err_out
+    address: 0x02
+    register_type: holding
+    use_write_multiple: true
+    value_type: U_DWORD
+    write_lambda: |-
+      payload.push_back(0xffff);
+      payload.push_back(0xffff);
+      return true;
+
+  - platform: modbus_controller
+    modbus_controller_id: breezart
+    id: set_time
+    address: 0x04
+    register_type: holding
+    use_write_multiple: true
+    value_type: U_DWORD
+    write_lambda: |-
+      if (x) {
+        time_t now = ::time(nullptr);
+        struct tm *time_info = ::localtime(&now);
+        int wday = time_info->tm_wday;
+        int seconds = time_info->tm_sec;
+        int minutes = time_info->tm_min;
+        int hour = time_info->tm_hour;
+        payload.push_back(hour << 8 | minutes);
+        payload.push_back(wday << 8 | seconds);
+      }
+      return true;
