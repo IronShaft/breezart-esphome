@@ -7,6 +7,10 @@ esphome:
 
 esp8266:
   board: d1_mini
+  restore_from_flash: true
+
+preferences:
+  flash_write_interval: 10min
 
 # Enable Home Assistant API
 api:
@@ -17,7 +21,8 @@ logger:
   baud_rate: 0
 
 ota:
-  password: !secret esp_pass
+  - platform: esphome
+    password: !secret esp_pass
 
 wifi:
   ssid: !secret wifi_ssid
@@ -292,6 +297,7 @@ switch:
   - platform: modbus_controller
     modbus_controller_id: breezart
     id: power
+    restore_mode: RESTORE_DEFAULT_ON
     name: "Power"
     icon: "mdi:power"
     address: 0x66
@@ -301,6 +307,7 @@ switch:
   - platform: modbus_controller
     modbus_controller_id: breezart
     id: comfort
+    restore_mode: RESTORE_DEFAULT_OFF
     name: "Comfort"
     icon: "mdi:leaf"
     address: 0x56
@@ -309,7 +316,11 @@ switch:
       reg_0x56 = data[0] << 8 | data[1];
       return reg_0x56 & 0x10;
     write_lambda: |-
-      reg_0x56 ^= 0x10;
+      if (item->state) { // ON -> OFF
+        reg_0x56 &= !(0x0010);
+      } else { // OFF -> ON
+        reg_0x56 |= 0x10;
+      }
       payload.push_back(0x01); // device address
       payload.push_back(0x06); // force single register
       payload.push_back(0x00); // high byte address of the register
@@ -321,6 +332,8 @@ switch:
   - platform: modbus_controller
     modbus_controller_id: breezart
     id: heating
+    inverted: true
+    restore_mode: RESTORE_INVERTED_DEFAULT_ON
     name: "Heating"
     icon: "mdi:heating-coil"
     address: 0x56
@@ -329,7 +342,11 @@ switch:
       reg_0x56 = data[0] << 8 | data[1];
       return reg_0x56 & 0x1;
     write_lambda: |-
-      reg_0x56 ^= 0x1;
+      if (item->state) { // ON -> OFF
+        reg_0x56 |= 0x1;
+      } else { // OFF -> ON
+        reg_0x56 &= !(0x0001);
+      }
       payload.push_back(0x01); // device address
       payload.push_back(0x06); // force single register
       payload.push_back(0x00); // high byte address of the register
@@ -341,6 +358,7 @@ switch:
   - platform: modbus_controller
     modbus_controller_id: breezart
     id: restart
+    restore_mode: RESTORE_DEFAULT_ON
     name: "Restart"
     icon: "mdi:restart"
     address: 0x56
@@ -349,7 +367,11 @@ switch:
       reg_0x56 = data[0] << 8 | data[1];
       return reg_0x56 & 0x100;
     write_lambda: |-
-      reg_0x56 ^= 0x100;
+      if (item->state) { // ON -> OFF
+        reg_0x56 &= !(0x0100);
+      } else { // OFF -> ON
+        reg_0x56 |= 0x100;
+      }
       payload.push_back(0x01); // device address
       payload.push_back(0x06); // force single register
       payload.push_back(0x00); // high byte address of the register
